@@ -87,45 +87,48 @@ with tab3:
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # 1. Save the file so both st.video and OpenCV can see it
+        # 1. Initialize variables to prevent Traceback NameErrors
+        final_word = "" 
+        
+        # 2. Save the file so OpenCV can read it
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # 2. THE PLAYER: Use the native Streamlit player for Play/Pause/Repeat
-        # This gives the user the standard HTML5 video controls
+        # 3. NATIVE PLAYER: This provides HTML5 Play/Pause/Repeat controls
         st.video(uploaded_video)
         
-        # 3. THE ANALYSIS: A dedicated button to run your YOLO model
+        # 4. ANALYSIS TRIGGER
         if st.button("🔍 Run AI Word Analysis"):
             cap = cv2.VideoCapture(tfile.name)
             
             if not cap.isOpened():
-                st.error("Could not process video. Please ensure it is a standard MP4.")
+                st.error("OpenCV failed to open video. Please use a standard H.264 MP4.")
             else:
-                # --- Analysis Setup ---
+                # Setup logic variables
                 WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
-                final_word, last_word, prediction_window = "", None, []
+                last_word, prediction_window = None, []
                 
-                # UI feedback for processing
+                # Progress UI
                 status_bar = st.progress(0)
                 status_text = st.empty()
                 frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 current_frame = 0
 
-                # --- Processing Loop ---
+                # --- The Core Prediction Loop ---
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret: break
                     
-                    # Run YOLO Prediction
-                    model = load_word_model()
+                    # YOLO Inference
+                    model=load_word_model()
                     results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
-                    # Voting Logic
+                    # Temporal Voting Logic
                     prediction_window.append(label)
-                    if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
+                    if len(prediction_window) > WINDOW_SIZE: 
+                        prediction_window.pop(0)
                     
                     if len(prediction_window) == WINDOW_SIZE:
                         counts = Counter(prediction_window)
@@ -133,25 +136,23 @@ with tab3:
                         
                         if count >= VOTE_THRESHOLD and common != last_word:
                             if common not in ["Nothing", "Space"]:
-                                final_word += f"{common}"
+                                final_word += f" {common}"
                                 last_word = common
-                                prediction_window = [] # Wait for next sign
+                                prediction_window = [] # Reset for next sign
 
-                    # Update Progress
+                    # Update UI progress
                     current_frame += 1
                     if current_frame % 10 == 0:
                         status_bar.progress(min(current_frame / frame_total, 1.0))
-                        status_text.markdown(f"**Analyzing Frames...** Detected so far: `{final_word}`")
+                        status_text.markdown(f"**Analyzing...** Current Words: `{final_word}`")
 
                 cap.release()
                 
-                # 4. FINAL OUTPUT
+                # --- FINAL OUTPUT ---
                 status_bar.empty()
                 status_text.empty()
-                st.success(f"🏆 **Final Identified Word(s):** {final_word}")
+                st.success(f"🏆 Final Identified Word(s): **{final_word}**")
                 
-        # Cleanup
+        # Cleanup temp file
         if os.path.exists(tfile.name):
             os.unlink(tfile.name)
-
-            st.success(f"🏁 Word(s) Detected: {final_word}")
