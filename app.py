@@ -83,33 +83,43 @@ with tab2:
 
 # Logic for Tab 3 (Word Video)
 with tab3:
-    st.header("🎥 Word Identification from Video")
-    uploaded_video = st.file_uploader("Upload a sign language video", type=['mp4', 'mov', 'avi'], key="word_vid")
+    st.header("🎥 Word Identification (Video)")
+    uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # 1. Display the video for the user to see immediately
-        st.video(uploaded_video)
+        # --- THE FIX: RESET BUFFER ---
+        # Reset pointer to start so we can write the temp file
+        uploaded_video.seek(0)
         
-        # 2. Prepare the video for OpenCV processing
-        # We use a temporary file because cv2.VideoCapture requires a file path, not a buffer
+        # Save to a temporary file for OpenCV (cv2 requires a file path) 
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
-        tfile.close() # Close to ensure all data is written
+        tfile.close() 
+
+        # Reset pointer AGAIN so st.video can display it in the browser
+        uploaded_video.seek(0)
+        st.video(uploaded_video)
         
-        if st.button("🚀 Run Video Recognition"):
+        if st.button("Analyze Video"):
+            # Load the word model
+            model = load_word_model()
             cap = cv2.VideoCapture(tfile.name)
             
-            # Check if video opened successfully
             if not cap.isOpened():
-                st.error("Error: Could not open video file.")
+                st.error("OpenCV could not open this video format. Try a standard H.264 MP4.")
             else:
-                prediction_window = []
-                final_word = ""
+                # --- PREDICTION SETTINGS ---
+                WINDOW_SIZE = 12       # Look at 12 frames at a time 
+                VOTE_THRESHOLD = 8     # Must see the same word 8/12 times 
                 
-                # Progress UI
-                status_area = st.empty()
+                final_word = ""
+                last_committed_word = None
+                prediction_window = []
+                
+                # UI Placeholders for live updates
+                status_text = st.empty()
                 progress_bar = st.progress(0)
-                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 current_frame = 0
 
                 while cap.isOpened():
@@ -117,36 +127,46 @@ with tab3:
                     if not ret:
                         break
                     
-                    # Perform prediction on the frame
-                    model = load_word_model()
-                    res = model(frame, verbose=False)
-                    label = res[0].names[res[0].probs.top1]
+                    # 1. Predict current frame [cite: 7]
+                    results = model(frame, verbose=False)
+                    label = results[0].names[results[0].probs.top1]
                     
-                    # Voting logic [cite: 6, 8, 9]
+                    # 2. Add to rolling window [cite: 8]
                     prediction_window.append(label)
-                    if len(prediction_window) > 12: 
+                    if len(prediction_window) > WINDOW_SIZE:
                         prediction_window.pop(0)
                     
-                    if len(prediction_window) == 12:
-                        common, count = Counter(prediction_window).most_common(1)[0]
-                        # 8/12 threshold for stability [cite: 6, 9]
-                        if count >= 8 and common not in ["Nothing", "Space"]:
-                            if not final_word.endswith(common):
-                                final_word += common
-                    
-                    # Update progress UI
+                    # 3. Analyze window for a "Stable" word [cite: 9]
+                    if len(prediction_window) == WINDOW_SIZE:
+                        counts = Counter(prediction_window)
+                        most_common, count = counts.most_common(1)[0]
+                        
+                        # Only commit if stable and not the same as the previous word [cite: 9]
+                        if count >= VOTE_THRESHOLD and most_common != last_committed_word:
+                            if most_common not in ["Nothing", "Space"]:
+                                final_word += f" {most_common}"
+                                last_committed_word = most_common
+                                # Optional: Clear window to wait for next distinct sign [cite: 10]
+                                prediction_window = [] 
+                            
+                            elif most_common == "Space":
+                                final_word += " "
+                                last_committed_word = most_common
+                                prediction_window = []
+
+                    # Update Progress
                     current_frame += 1
-                    if current_frame % 10 == 0: # Update UI every 10 frames to keep it smooth
-                        progress_bar.progress(min(current_frame / frame_count, 1.0))
-                        status_area.markdown(f"**Status:** Processing frames... Current Word: `{final_word}`")
+                    if current_frame % 5 == 0:
+                        progress_bar.progress(min(current_frame / frame_total, 1.0))
+                        status_text.write(f"Analyzing... Current Word(s): **{final_word}**")
 
                 cap.release()
                 
-                # FINAL RESULT
-                status_area.empty()
+                # --- FINAL RESULT ---
+                status_text.empty()
                 progress_bar.empty()
-                st.success(f"🏆 **Final Identified Word:** {final_word}")
+                st.success(f"🏆 Final Identified Word(s): **{final_word}**")
                 
-            # Cleanup temp file
+            # Cleanup the temporary file from the server
             if os.path.exists(tfile.name):
                 os.unlink(tfile.name)
