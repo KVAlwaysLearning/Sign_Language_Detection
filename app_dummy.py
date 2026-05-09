@@ -4,56 +4,49 @@ import tempfile
 import time
 import os
 
-st.title("🎥 Controlled Duration Player")
+st.title("🎥 Stable Playback Test")
 
 uploaded_video = st.file_uploader("Upload Video", type=['mp4', 'mov', 'avi'])
 
 if uploaded_video:
-    # 1. Save to disk
+    # 1. Save file to disk
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     tfile.write(uploaded_video.read())
     tfile.close()
 
     # 2. UI Setup
-    video_screen = st.empty()
-    status_text = st.empty()
+    # We use a container to keep the UI from shifting
+    container = st.container()
+    video_screen = container.empty() 
     
-    cap = cv2.VideoCapture(tfile.name)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # --- THE PLAYTIME FIX ---
-    # If the video feels too fast, we manually set a slow FPS (e.g., 15 or 20)
-    # This forces the video to stay on screen longer.
-    target_fps = 18  # Lower this number to make it even slower
-    frame_delay = 1.0 / target_fps 
-
-    if st.button("▶️ Start Slow Playback"):
-        current_frame = 0
+    if st.button("▶️ Start Playback"):
+        cap = cv2.VideoCapture(tfile.name)
+        
+        # We manually force a slow playback (12 frames per second)
+        # This ensures the browser has time to render every image.
+        target_delay = 1.0 / 12  
+        
+        # We only process every 2nd frame to reduce data load
+        frame_idx = 0
         
         while cap.isOpened():
-            start_time = time.time()
             ret, frame = cap.read()
-            
             if not ret:
                 break
             
-            # Update the UI
-            video_screen.image(frame, channels="BGR", use_container_width=True)
+            if frame_idx % 2 == 0:
+                # 3. THE KEY FIX: Convert BGR to RGB and update the placeholder
+                # We use use_container_width to keep the size moderate
+                video_screen.image(frame, channels="BGR", use_container_width=True)
+                
+                # 4. HARD SLEEP
+                # This forces the script to pause so the browser can catch up
+                time.sleep(target_delay)
             
-            # Progress feedback
-            current_frame += 1
-            status_text.text(f"Playing frame {current_frame} of {total_frames}...")
-
-            # --- FORCED WAIT ---
-            # This is the "Anti-Lag" logic. It ensures the frame stays 
-            # visible for the exact 'frame_delay' duration.
-            elapsed = time.time() - start_time
-            sleep_time = max(0, frame_delay - elapsed)
-            time.sleep(sleep_time)
+            frame_idx += 1
             
         cap.release()
-        status_text.success("✅ Playback Complete")
+        st.success("✅ Video reached the end.")
 
     if os.path.exists(tfile.name):
         os.unlink(tfile.name)
