@@ -165,7 +165,7 @@ with tab3:
                 # --- FINAL RESULT ---
                 status_text.empty()
                 progress_bar.empty()
-                st.success(f"🏆 Final Identified Word(s): **{final_word}**")
+                st.success(f"🏆 Final Identified Word(s): \b{final_word}\b")
                 
             # Cleanup the temporary file from the server
             if os.path.exists(tfile.name):
