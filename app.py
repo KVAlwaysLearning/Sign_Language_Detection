@@ -87,30 +87,28 @@ with tab3:
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # Save to a temporary file for OpenCV
+        # 1. Save to temporary file
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # PREVIEW: Instead of st.video(), we show the first frame so you know it's there
-        cap = cv2.VideoCapture(tfile.name)
-        ret, first_frame = cap.read()
-        if ret:
-            st.image(first_frame, channels="BGR", caption="Video Loaded Successfully", width=400)
-        cap.release()
-
+        # 2. Setup moderate-sized UI containers
+        # We use columns to constrain the width so the video doesn't become "large"
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            video_frame_placeholder = st.empty() # The actual "screen"
+            progress_bar = st.progress(0)        # The playback progress
+            status_text = st.empty()           # The prediction text
+        
         if st.button("Analyze & Play Video"):
-            # RE-OPEN for analysis
             cap = cv2.VideoCapture(tfile.name)
             
-            # --- THE UI FIX: Use st.empty to show the video playing live ---
-            # This bypasses the browser's MP4 player entirely
-            video_frame_placeholder = st.empty() 
-            status_text = st.empty()
-            
-            # Prediction Logic
+            # Prediction Logic Settings
             WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
             final_word, last_word, prediction_window = "", None, []
+            
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            current_frame = 0
             
             model = load_word_model()
 
@@ -118,15 +116,19 @@ with tab3:
                 ret, frame = cap.read()
                 if not ret: break
                 
-                # 1. Prediction
+                # A. Prediction
                 results = model(frame, verbose=False)
                 label = results[0].names[results[0].probs.top1]
                 
-                # 2. Update UI with the CURRENT FRAME (Simulates playback)
-                # We convert BGR to RGB for Streamlit display
+                # B. UPDATE UI (Moderately sized, no thumbnail)
+                # 'use_container_width=True' inside the column keeps it at moderate size
                 video_frame_placeholder.image(frame, channels="BGR", use_container_width=True)
                 
-                # 3. Voting Logic
+                # C. Update Manual Progress Bar
+                current_frame += 1
+                progress_bar.progress(min(current_frame / total_frames, 1.0))
+                
+                # D. Voting Logic
                 prediction_window.append(label)
                 if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
                 
@@ -138,8 +140,11 @@ with tab3:
                             last_word = common
                             prediction_window = []
                 
-                status_text.markdown(f"**Live Prediction:** {final_word}")
+                status_text.markdown(f"**Live Prediction:** `{final_word}`")
 
             cap.release()
             st.success(f"🏁 **Final Identified Word:** {final_word}")
-            os.unlink(tfile.name)
+            
+            # Cleanup
+            if os.path.exists(tfile.name):
+                os.unlink(tfile.name)
