@@ -89,29 +89,33 @@ with tab3:
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # 1. Save to temporary file
+        # --- THE FIX: RESET POINTER FOR PLAYBACK ---
+        uploaded_video.seek(0) # Reset to start
+        
+        # 1. Native HTML5 Player (Plays automatically and supports repeat/replay)
+        # This removes the "thumbnail" issue as the browser handles the stream
+        st.subheader("Direct Video Playback")
+        st.video(uploaded_video, autoplay=True, loop=True)
+        
+        # 2. Save for OpenCV (AI Analysis)
+        # We must seek(0) again before reading to save
+        uploaded_video.seek(0)
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # 2. AUTO-PLAY SECTION (Visual Only)
-        # We display the video immediately. It will play automatically.
-        st.subheader("Video Preview")
-        st.video(uploaded_video, autoplay=True, loop=True, muted=True)
-        
         st.divider()
         
-        # 3. ANALYSIS SECTION (Separate Button)
+        # 3. ANALYSIS SECTION
         if st.button("🔍 Start AI Word Analysis"):
             cap = cv2.VideoCapture(tfile.name)
             
             if not cap.isOpened():
-                st.error("Cannot process video.")
+                st.error("OpenCV could not open video. Check file format.")
             else:
-                # Moderate-sized containers for the AI View
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:
-                    st.write("### AI Analysis View")
+                    st.write("### AI Processing View")
                     video_screen = st.empty()
                     progress_bar = st.progress(0)
                     status_text = st.empty()
@@ -122,19 +126,18 @@ with tab3:
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 current_frame = 0
                 
-                # Use pre-loaded model
                 model = load_word_model()
 
-                # Loop for Analysis with Forced Slow Speed
+                # Loop for Analysis
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret: break 
                     
-                    # A. AI Analysis
+                    # AI Inference
                     results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
-                    # B. Voting Logic
+                    # Voting Logic
                     prediction_window.append(label)
                     if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
                     if len(prediction_window) == WINDOW_SIZE:
@@ -145,12 +148,9 @@ with tab3:
                                 last_word = common
                                 prediction_window = []
 
-                    # C. Render "AI View" frame
+                    # Render AI frame and slow down for visibility
                     video_screen.image(frame, channels="BGR", use_container_width=True)
-                    
-                    # D. Slow down the playback manually
-                    # This makes the analysis appear 'slow and steady'
-                    time.sleep(0.05) 
+                    time.sleep(0.05) # Controlled slow playback speed
                     
                     current_frame += 1
                     progress_bar.progress(min(current_frame / total_frames, 1.0))
