@@ -83,31 +83,30 @@ with tab2:
 
 # Logic for Tab 3 (Word Video)
 import time
+import os
 
 with tab3:
     st.header("🎥 Word Identification")
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # --- 1. RESET POINTERS ---
-        uploaded_video.seek(0)
+        # --- 1. HANDLE FILE SAVING SAFELY ---
+        # We read the bytes first to ensure we have a fresh copy for both playback and CV2
+        video_bytes = uploaded_video.read()
         
-        # Save to temp file for OpenCV
+        # Save to a temporary file on disk for OpenCV
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        tfile.write(uploaded_video.read())
+        tfile.write(video_bytes)
         tfile.close() 
         
-        # --- 2. THE PLAYER (No Thumbnail) ---
-        # We reset the pointer again so the video widget doesn't stay 'black'
-        uploaded_video.seek(0)
-        
-        # Use a unique key to prevent Streamlit from 'sticking' to old thumbnails
-        st.video(uploaded_video, autoplay=True, loop=True, key=f"video_{len(uploaded_video.name)}")
+        # --- 2. THE PLAYER (Immediate Playback) ---
+        # We pass the bytes directly to st.video to avoid pointer/seek errors
+        # This removes the black screen issue caused by empty file buffers
+        st.video(video_bytes) 
         
         st.divider()
 
         # --- 3. ANALYSIS SECTION ---
-        # Create a container that is ONLY populated when the button is clicked
         analysis_container = st.container()
         
         if st.button("🔍 Start AI Word Analysis"):
@@ -115,14 +114,13 @@ with tab3:
                 cap = cv2.VideoCapture(tfile.name)
                 
                 if not cap.isOpened():
-                    st.error("Error: Video format not supported by OpenCV.")
+                    st.error("Error: Could not open video for AI analysis.")
                 else:
-                    # Moderate sized columns for the AI output
+                    # Centered columns for moderate size
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
-                        # Use st.empty() so the frame replaces itself instantly (No thumbnail)
+                        # Placeholder for the AI stream (No static thumbnail)
                         video_screen = st.empty() 
-                        # We use a simple text status instead of a progress bar to keep it clean
                         status_text = st.empty()
 
                     # Logic Settings
@@ -133,28 +131,33 @@ with tab3:
 
                     while cap.isOpened():
                         ret, frame = cap.read()
-                        if not ret: break 
+                        if not ret: 
+                            break 
                         
                         # AI Inference
                         results = model(frame, verbose=False)
                         label = results[0].names[results[0].probs.top1]
                         
-                        # Voting Logic
+                        # Temporal Voting Logic
                         prediction_window.append(label)
-                        if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
+                        if len(prediction_window) > WINDOW_SIZE: 
+                            prediction_window.pop(0)
+                        
                         if len(prediction_window) == WINDOW_SIZE:
-                            common, count = Counter(prediction_window).most_common(1)[0]
+                            counts = Counter(prediction_window)
+                            common, count = counts.most_common(1)[0]
+                            
                             if count >= VOTE_THRESHOLD and common != last_word:
                                 if common not in ["Nothing", "Space"]:
                                     final_word += f" {common}"
                                     last_word = common
                                     prediction_window = []
 
-                        # UPDATE THE SCREEN: No progress bar, no thumbnail
+                        # Render current frame to the AI screen
                         video_screen.image(frame, channels="BGR", use_container_width=True)
                         status_text.markdown(f"### 🔤 Detected: `{final_word}`")
                         
-                        # Controlled Slow Playback
+                        # Control speed to ensure it's not too fast
                         time.sleep(0.04) 
 
                     cap.release()
@@ -162,5 +165,7 @@ with tab3:
 
         # Cleanup temp file
         if os.path.exists(tfile.name):
-            try: os.unlink(tfile.name)
-            except: pass
+            try:
+                os.unlink(tfile.name)
+            except:
+                pass
