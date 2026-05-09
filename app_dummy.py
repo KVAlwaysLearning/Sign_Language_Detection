@@ -1,52 +1,31 @@
 import streamlit as st
-import cv2
-import tempfile
-import time
-import os
+import base64
 
-st.title("🎥 Stable Playback Test")
+st.title("🎥 Zero-Lag Native Video Player")
 
 uploaded_video = st.file_uploader("Upload Video", type=['mp4', 'mov', 'avi'])
 
 if uploaded_video:
-    # 1. Save file to disk
-    tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-    tfile.write(uploaded_video.read())
-    tfile.close()
-
-    # 2. UI Setup
-    # We use a container to keep the UI from shifting
-    container = st.container()
-    video_screen = container.empty() 
+    # 1. Convert video to Base64
+    # This encodes the video so the HTML tag can read it as a direct data URI
+    video_bytes = uploaded_video.read()
+    base64_video = base64.b64encode(video_bytes).decode()
     
-    if st.button("▶️ Start Playback"):
-        cap = cv2.VideoCapture(tfile.name)
-        
-        # We manually force a slow playback (12 frames per second)
-        # This ensures the browser has time to render every image.
-        target_delay = 1.0 / 12  
-        
-        # We only process every 2nd frame to reduce data load
-        frame_idx = 0
-        
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            if frame_idx % 2 == 0:
-                # 3. THE KEY FIX: Convert BGR to RGB and update the placeholder
-                # We use use_container_width to keep the size moderate
-                video_screen.image(frame, channels="BGR", use_container_width=True)
-                
-                # 4. HARD SLEEP
-                # This forces the script to pause so the browser can catch up
-                time.sleep(target_delay)
-            
-            frame_idx += 1
-            
-        cap.release()
-        st.success("✅ Video reached the end.")
+    # 2. Construct HTML5 Video Tag
+    # We use 'autoplay' and 'controls' to ensure it plays and can be replayed
+    video_html = f'''
+        <video width="100%" controls autoplay>
+            <source src="data:video/mp4;base64,{base64_video}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    '''
+    
+    # 3. Display the Video using Markdown
+    # unsafe_allow_html=True is required to render the video tag
+    st.markdown(video_html, unsafe_allow_html=True)
+    
+    st.success("Video successfully injected into browser memory for native playback.")
 
-    if os.path.exists(tfile.name):
-        os.unlink(tfile.name)
+    # 4. Separate Analysis Trigger (For your actual app)
+    if st.button("🔍 Run AI Analysis (On Disk Copy)"):
+        st.info("In your real app, this button will run the YOLO loop in the background.")
