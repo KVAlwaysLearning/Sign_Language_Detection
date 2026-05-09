@@ -83,69 +83,74 @@ with tab2:
 
 # Logic for Tab 3 (Word Video)
 with tab3:
-    st.header("🎥 Word Identification (Interactive Player)")
+    st.header("🎥 Word Identification (Video)")
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # 1. Save and initialize
+        # 1. Save the file so both st.video and OpenCV can see it
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # --- SESSION STATE FOR CONTROLS ---
-        if 'playing' not in st.session_state:
-            st.session_state.playing = False
-        if 'frame_idx' not in st.session_state:
-            st.session_state.frame_idx = 0
-
-        # 2. PLAYER CONTROLS (HTML Style)
-        col_p, col_pa, col_re = st.columns([1, 1, 1])
-        with col_p:
-            if st.button("▶️ Play / Resume"): st.session_state.playing = True
-        with col_pa:
-            if st.button("⏸ Pause"): st.session_state.playing = False
-        with col_re:
-            if st.button("🔄 Repeat / Reset"): 
-                st.session_state.frame_idx = 0
-                st.session_state.playing = True
-
-        # 3. THE DISPLAY SCREEN
-        video_screen = st.empty()
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        # 4. PROCESSING LOOP
-        if st.session_state.playing:
+        # 2. THE PLAYER: Use the native Streamlit player for Play/Pause/Repeat
+        # This gives the user the standard HTML5 video controls
+        st.video(uploaded_video)
+        
+        # 3. THE ANALYSIS: A dedicated button to run your YOLO model
+        if st.button("🔍 Run AI Word Analysis"):
             cap = cv2.VideoCapture(tfile.name)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, st.session_state.frame_idx)
             
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            prediction_window = []
-            final_word = ""
+            if not cap.isOpened():
+                st.error("Could not process video. Please ensure it is a standard MP4.")
+            else:
+                # --- Analysis Setup ---
+                WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
+                final_word, last_word, prediction_window = "", None, []
+                
+                # UI feedback for processing
+                status_bar = st.progress(0)
+                status_text = st.empty()
+                frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                current_frame = 0
 
-            while st.session_state.playing:
-                ret, frame = cap.read()
-                if not ret:
-                    st.session_state.playing = False # End of video
-                    break
-                
-                # Update current position
-                st.session_state.frame_idx += 1
-                
-                # A. Analysis (Every 3rd frame to keep playback smooth)
-                if st.session_state.frame_idx % 3 == 0:
-                    model = load_word_model()
-                    results = model(frame, verbose=False)
+                # --- Processing Loop ---
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret: break
+                    
+                    # Run YOLO Prediction
+                    results = word_model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
-                    # ... [Insert your existing Voting Logic here] ...
+                    
+                    # Voting Logic
+                    prediction_window.append(label)
+                    if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
+                    
+                    if len(prediction_window) == WINDOW_SIZE:
+                        counts = Counter(prediction_window)
+                        common, count = counts.most_common(1)[0]
+                        
+                        if count >= VOTE_THRESHOLD and common != last_word:
+                            if common not in ["Nothing", "Space"]:
+                                final_word += f" {common}"
+                                last_word = common
+                                prediction_window = [] # Wait for next sign
 
-                # B. Render to Screen (Moderate Size)
-                video_screen.image(frame, channels="BGR", use_container_width=True)
-                progress_bar.progress(min(st.session_state.frame_idx / total_frames, 1.0))
+                    # Update Progress
+                    current_frame += 1
+                    if current_frame % 10 == 0:
+                        status_bar.progress(min(current_frame / frame_total, 1.0))
+                        status_text.markdown(f"**Analyzing Frames...** Detected so far: `{final_word}`")
+
+                cap.release()
                 
-                # Check for "Pause" interaction (Streamlit reruns on button click)
-                # Note: Because Streamlit is top-down, clicking "Pause" will 
-                # stop this loop on the next rerun.
+                # 4. FINAL OUTPUT
+                status_bar.empty()
+                status_text.empty()
+                st.success(f"🏆 **Final Identified Word(s):** {final_word}")
+                
+        # Cleanup
+        if os.path.exists(tfile.name):
+            os.unlink(tfile.name)
 
-            cap.release()
             st.success(f"🏁 Word(s) Detected: {final_word}")
