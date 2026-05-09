@@ -89,77 +89,78 @@ with tab3:
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # --- THE FIX: RESET POINTER FOR PLAYBACK ---
-        uploaded_video.seek(0) # Reset to start
-        
-        # 1. Native HTML5 Player (Plays automatically and supports repeat/replay)
-        # This removes the "thumbnail" issue as the browser handles the stream
-        st.subheader("Direct Video Playback")
-        st.video(uploaded_video, autoplay=True, loop=True)
-        
-        # 2. Save for OpenCV (AI Analysis)
-        # We must seek(0) again before reading to save
+        # --- 1. RESET POINTERS ---
         uploaded_video.seek(0)
+        
+        # Save to temp file for OpenCV
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
-
-        st.divider()
         
-        # 3. ANALYSIS SECTION
+        # --- 2. THE PLAYER (No Thumbnail) ---
+        # We reset the pointer again so the video widget doesn't stay 'black'
+        uploaded_video.seek(0)
+        
+        # Use a unique key to prevent Streamlit from 'sticking' to old thumbnails
+        st.video(uploaded_video, autoplay=True, loop=True, key=f"video_{len(uploaded_video.name)}")
+        
+        st.divider()
+
+        # --- 3. ANALYSIS SECTION ---
+        # Create a container that is ONLY populated when the button is clicked
+        analysis_container = st.container()
+        
         if st.button("🔍 Start AI Word Analysis"):
-            cap = cv2.VideoCapture(tfile.name)
-            
-            if not cap.isOpened():
-                st.error("OpenCV could not open video. Check file format.")
-            else:
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col2:
-                    st.write("### AI Processing View")
-                    video_screen = st.empty()
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
-                # Logic Settings
-                WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
-                final_word, last_word, prediction_window = "", None, []
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                current_frame = 0
+            with analysis_container:
+                cap = cv2.VideoCapture(tfile.name)
                 
-                model = load_word_model()
+                if not cap.isOpened():
+                    st.error("Error: Video format not supported by OpenCV.")
+                else:
+                    # Moderate sized columns for the AI output
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        # Use st.empty() so the frame replaces itself instantly (No thumbnail)
+                        video_screen = st.empty() 
+                        # We use a simple text status instead of a progress bar to keep it clean
+                        status_text = st.empty()
 
-                # Loop for Analysis
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret: break 
+                    # Logic Settings
+                    WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
+                    final_word, last_word, prediction_window = "", None, []
                     
-                    # AI Inference
-                    results = model(frame, verbose=False)
-                    label = results[0].names[results[0].probs.top1]
-                    
-                    # Voting Logic
-                    prediction_window.append(label)
-                    if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
-                    if len(prediction_window) == WINDOW_SIZE:
-                        common, count = Counter(prediction_window).most_common(1)[0]
-                        if count >= VOTE_THRESHOLD and common != last_word:
-                            if common not in ["Nothing", "Space"]:
-                                final_word += f" {common}"
-                                last_word = common
-                                prediction_window = []
+                    model = load_word_model()
 
-                    # Render AI frame and slow down for visibility
-                    video_screen.image(frame, channels="BGR", use_container_width=True)
-                    time.sleep(0.05) # Controlled slow playback speed
-                    
-                    current_frame += 1
-                    progress_bar.progress(min(current_frame / total_frames, 1.0))
-                    status_text.markdown(f"**Identified:** `{final_word}`")
+                    while cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret: break 
+                        
+                        # AI Inference
+                        results = model(frame, verbose=False)
+                        label = results[0].names[results[0].probs.top1]
+                        
+                        # Voting Logic
+                        prediction_window.append(label)
+                        if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
+                        if len(prediction_window) == WINDOW_SIZE:
+                            common, count = Counter(prediction_window).most_common(1)[0]
+                            if count >= VOTE_THRESHOLD and common != last_word:
+                                if common not in ["Nothing", "Space"]:
+                                    final_word += f" {common}"
+                                    last_word = common
+                                    prediction_window = []
 
-                cap.release()
-                st.success(f"🏆 Final Identified Word: **{final_word}**")
+                        # UPDATE THE SCREEN: No progress bar, no thumbnail
+                        video_screen.image(frame, channels="BGR", use_container_width=True)
+                        status_text.markdown(f"### 🔤 Detected: `{final_word}`")
+                        
+                        # Controlled Slow Playback
+                        time.sleep(0.04) 
 
-        # Cleanup
+                    cap.release()
+                    st.success(f"🏆 Final Word: **{final_word}**")
+
+        # Cleanup temp file
         if os.path.exists(tfile.name):
             try: os.unlink(tfile.name)
             except: pass
