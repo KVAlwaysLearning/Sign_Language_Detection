@@ -83,33 +83,69 @@ with tab2:
 
 # Logic for Tab 3 (Word Video)
 with tab3:
-    uploaded_video = st.file_uploader("Word Video", type=['mp4', 'mov', 'avi'], key="word_vid")
+    st.header("🎥 Word Identification from Video")
+    uploaded_video = st.file_uploader("Upload a sign language video", type=['mp4', 'mov', 'avi'], key="word_vid")
+    
     if uploaded_video:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_video.read())
+        # 1. Display the video for the user to see immediately
         st.video(uploaded_video)
         
-        if st.button("Process Video"):
-            model = load_word_model()
+        # 2. Prepare the video for OpenCV processing
+        # We use a temporary file because cv2.VideoCapture requires a file path, not a buffer
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        tfile.write(uploaded_video.read())
+        tfile.close() # Close to ensure all data is written
+        
+        if st.button("🚀 Run Video Recognition"):
             cap = cv2.VideoCapture(tfile.name)
-            final_word, prediction_window = "", []
             
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret: break
+            # Check if video opened successfully
+            if not cap.isOpened():
+                st.error("Error: Could not open video file.")
+            else:
+                prediction_window = []
+                final_word = ""
                 
-                res = model(frame, verbose=False)
-                label = res[0].names[res[0].probs.top1]
+                # Progress UI
+                status_area = st.empty()
+                progress_bar = st.progress(0)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                current_frame = 0
+
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    # Perform prediction on the frame
+                    res = word_model(frame, verbose=False)
+                    label = res[0].names[res[0].probs.top1]
+                    
+                    # Voting logic [cite: 6, 8, 9]
+                    prediction_window.append(label)
+                    if len(prediction_window) > 12: 
+                        prediction_window.pop(0)
+                    
+                    if len(prediction_window) == 12:
+                        common, count = Counter(prediction_window).most_common(1)[0]
+                        # 8/12 threshold for stability [cite: 6, 9]
+                        if count >= 8 and common not in ["Nothing", "Space"]:
+                            if not final_word.endswith(common):
+                                final_word += common
+                    
+                    # Update progress UI
+                    current_frame += 1
+                    if current_frame % 10 == 0: # Update UI every 10 frames to keep it smooth
+                        progress_bar.progress(min(current_frame / frame_count, 1.0))
+                        status_area.markdown(f"**Status:** Processing frames... Current Word: `{final_word}`")
+
+                cap.release()
                 
-                prediction_window.append(label)
-                if len(prediction_window) > 12: prediction_window.pop(0)
+                # FINAL RESULT
+                status_area.empty()
+                progress_bar.empty()
+                st.success(f"🏆 **Final Identified Word:** {final_word}")
                 
-                if len(prediction_window) == 12:
-                    common, count = Counter(prediction_window).most_common(1)[0]
-                    if count >= 8 and common not in ["Nothing", "Space"]:
-                        # Logic to prevent repeating letters
-                        if not final_word.endswith(common):
-                            final_word += common
-            
-            st.success(f"🏁 Final Word: {final_word}")
-            os.unlink(tfile.name)
+            # Cleanup temp file
+            if os.path.exists(tfile.name):
+                os.unlink(tfile.name)
