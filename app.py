@@ -82,54 +82,59 @@ with tab2:
             st.success(f"Result: {results[0].names[results[0].probs.top1]}")
 
 # Logic for Tab 3 (Word Video)
-import time # Ensure this is at the top of app.py
+import time
 
 with tab3:
-    st.header("🎥 Word Identification (Auto-Play & Analyze)")
+    st.header("🎥 Word Identification")
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        final_word = "" 
-        
+        # 1. Save to temporary file
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            video_screen = st.empty()
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+        # 2. AUTO-PLAY SECTION (Visual Only)
+        # We display the video immediately. It will play automatically.
+        st.subheader("Video Preview")
+        st.video(uploaded_video, autoplay=True, loop=True, muted=True)
         
-        if st.button("▶️ Start Recognition & Playback"):
+        st.divider()
+        
+        # 3. ANALYSIS SECTION (Separate Button)
+        if st.button("🔍 Start AI Word Analysis"):
             cap = cv2.VideoCapture(tfile.name)
             
             if not cap.isOpened():
-                st.error("Cannot play video.")
+                st.error("Cannot process video.")
             else:
-                # Get the actual frame rate of the video to match speed
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                if fps == 0 or fps > 60: fps = 30 # Default fallback
-                frame_delay = 1.0 / fps # Time to wait between frames
+                # Moderate-sized containers for the AI View
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.write("### AI Analysis View")
+                    video_screen = st.empty()
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
 
+                # Logic Settings
                 WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
-                last_word, prediction_window = None, []
+                final_word, last_word, prediction_window = "", None, []
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 current_frame = 0
                 
+                # Use pre-loaded model
                 model = load_word_model()
 
+                # Loop for Analysis with Forced Slow Speed
                 while cap.isOpened():
-                    start_time = time.time() # Record start of frame processing
-                    
                     ret, frame = cap.read()
                     if not ret: break 
                     
-                    # 1. AI Analysis
+                    # A. AI Analysis
                     results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
-                    # 2. Voting Logic
+                    # B. Voting Logic
                     prediction_window.append(label)
                     if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
                     if len(prediction_window) == WINDOW_SIZE:
@@ -140,22 +145,21 @@ with tab3:
                                 last_word = common
                                 prediction_window = []
 
-                    # 3. Update Video Screen
+                    # C. Render "AI View" frame
                     video_screen.image(frame, channels="BGR", use_container_width=True)
+                    
+                    # D. Slow down the playback manually
+                    # This makes the analysis appear 'slow and steady'
+                    time.sleep(0.05) 
                     
                     current_frame += 1
                     progress_bar.progress(min(current_frame / total_frames, 1.0))
-                    status_text.markdown(f"**Detecting:** `{final_word}`")
-
-                    # --- THE FIX: CONTROLLED DELAY ---
-                    # Calculate how long the AI took and wait the remaining time
-                    processing_time = time.time() - start_time
-                    wait_time = max(0, frame_delay - processing_time)
-                    time.sleep(wait_time) # Force the loop to match video speed
+                    status_text.markdown(f"**Identified:** `{final_word}`")
 
                 cap.release()
                 st.success(f"🏆 Final Identified Word: **{final_word}**")
 
+        # Cleanup
         if os.path.exists(tfile.name):
             try: os.unlink(tfile.name)
             except: pass
