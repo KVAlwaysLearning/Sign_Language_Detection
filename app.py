@@ -87,86 +87,59 @@ with tab3:
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # --- THE FIX: RESET BUFFER ---
-        # Reset pointer to start so we can write the temp file
-        uploaded_video.seek(0)
-        
-        # Save to a temporary file for OpenCV (cv2 requires a file path) 
+        # Save to a temporary file for OpenCV
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # Reset pointer AGAIN so st.video can display it in the browser
-        uploaded_video.seek(0)
-        st.video(uploaded_video)
-        
-        if st.button("Analyze Video"):
-            # Load the word model
-            model = load_word_model()
+        # PREVIEW: Instead of st.video(), we show the first frame so you know it's there
+        cap = cv2.VideoCapture(tfile.name)
+        ret, first_frame = cap.read()
+        if ret:
+            st.image(first_frame, channels="BGR", caption="Video Loaded Successfully", width=400)
+        cap.release()
+
+        if st.button("Analyze & Play Video"):
+            # RE-OPEN for analysis
             cap = cv2.VideoCapture(tfile.name)
             
-            if not cap.isOpened():
-                st.error("OpenCV could not open this video format. Try a standard H.264 MP4.")
-            else:
-                # --- PREDICTION SETTINGS ---
-                WINDOW_SIZE = 12       # Look at 12 frames at a time 
-                VOTE_THRESHOLD = 8     # Must see the same word 8/12 times 
-                
-                final_word = ""
-                last_committed_word = None
-                prediction_window = []
-                
-                # UI Placeholders for live updates
-                status_text = st.empty()
-                progress_bar = st.progress(0)
-                frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                current_frame = 0
+            # --- THE UI FIX: Use st.empty to show the video playing live ---
+            # This bypasses the browser's MP4 player entirely
+            video_frame_placeholder = st.empty() 
+            status_text = st.empty()
+            
+            # Prediction Logic
+            WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
+            final_word, last_word, prediction_window = "", None, []
+            
+            model = load_word_model()
 
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    
-                    # 1. Predict current frame [cite: 7]
-                    results = model(frame, verbose=False)
-                    label = results[0].names[results[0].probs.top1]
-                    
-                    # 2. Add to rolling window [cite: 8]
-                    prediction_window.append(label)
-                    if len(prediction_window) > WINDOW_SIZE:
-                        prediction_window.pop(0)
-                    
-                    # 3. Analyze window for a "Stable" word [cite: 9]
-                    if len(prediction_window) == WINDOW_SIZE:
-                        counts = Counter(prediction_window)
-                        most_common, count = counts.most_common(1)[0]
-                        
-                        # Only commit if stable and not the same as the previous word [cite: 9]
-                        if count >= VOTE_THRESHOLD and most_common != last_committed_word:
-                            if most_common not in ["Nothing", "Space"]:
-                                final_word += f" {most_common}"
-                                last_committed_word = most_common
-                                # Optional: Clear window to wait for next distinct sign [cite: 10]
-                                prediction_window = [] 
-                            
-                            elif most_common == "Space":
-                                final_word += " "
-                                last_committed_word = most_common
-                                prediction_window = []
-
-                    # Update Progress
-                    current_frame += 1
-                    if current_frame % 5 == 0:
-                        progress_bar.progress(min(current_frame / frame_total, 1.0))
-                        status_text.write(f"Analyzing... Current Word(s): **{final_word}**")
-
-                cap.release()
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
                 
-                # --- FINAL RESULT ---
-                status_text.empty()
-                progress_bar.empty()
-                st.success(f"🏆 Final Identified Word(s): \b{final_word}\b")
+                # 1. Prediction
+                results = model(frame, verbose=False)
+                label = results[0].names[results[0].probs.top1]
                 
-            # Cleanup the temporary file from the server
-            if os.path.exists(tfile.name):
-                os.unlink(tfile.name)
+                # 2. Update UI with the CURRENT FRAME (Simulates playback)
+                # We convert BGR to RGB for Streamlit display
+                video_frame_placeholder.image(frame, channels="BGR", use_container_width=True)
+                
+                # 3. Voting Logic
+                prediction_window.append(label)
+                if len(prediction_window) > WINDOW_SIZE: prediction_window.pop(0)
+                
+                if len(prediction_window) == WINDOW_SIZE:
+                    common, count = Counter(prediction_window).most_common(1)[0]
+                    if count >= VOTE_THRESHOLD and common != last_word:
+                        if common not in ["Nothing", "Space"]:
+                            final_word += f" {common}"
+                            last_word = common
+                            prediction_window = []
+                
+                status_text.markdown(f"**Live Prediction:** {final_word}")
+
+            cap.release()
+            st.success(f"🏁 **Final Identified Word:** {final_word}")
+            os.unlink(tfile.name)
