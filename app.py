@@ -118,6 +118,7 @@ with tab3:
                         break
                     
                     # Perform prediction on the frame
+                    model = load_word_model()
                     res = model(frame, verbose=False)
                     label = res[0].names[res[0].probs.top1]
                     
