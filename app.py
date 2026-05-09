@@ -127,6 +127,7 @@ with tab3:
                         break
                     
                     # AI Inference
+                    word_model=load_word_model()
                     results = word_model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
