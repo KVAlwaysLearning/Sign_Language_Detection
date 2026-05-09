@@ -1,25 +1,50 @@
 import streamlit as st
+import cv2
+import tempfile
+import time
 import os
 
-st.set_page_config(page_title="Stable Video Player", layout="centered")
-st.title("🎥 Standard HTML5 Player")
+st.title("🎥 Codec-Independent Player")
 
-# 1. File Uploader
-uploaded_video = st.file_uploader("Upload video", type=['mp4', 'mov', 'avi'])
+uploaded_video = st.file_uploader("Upload Video", type=['mp4', 'mov', 'avi'])
 
 if uploaded_video:
-    # --- THE FIX: PREVENT FREEZING ---
-    # We read the file into memory once. This ensures the stream is stable.
-    video_bytes = uploaded_video.read()
-    
-    # We provide the bytes directly to the video widget. 
-    # This uses the browser's hardware acceleration so it NEVER freezes.
-    st.video(video_bytes)
-    
-    st.success("Video loaded into browser memory.")
-    
-    # 2. Status Check
-    st.write(f"File Name: {uploaded_video.name}")
-    st.write(f"File Size: {len(video_bytes) / (1024*1024):.2f} MB")
+    # 1. Save to disk
+    tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    tfile.write(uploaded_video.read())
+    tfile.close()
 
-    st.info("💡 If you see a black screen here, your browser cannot decode this specific MP4 codec.")
+    # 2. Setup Screen
+    video_screen = st.empty()
+    cap = cv2.VideoCapture(tfile.name)
+    
+    # Get Metadata
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0: fps = 30
+    frame_delay = 1.0 / fps
+
+    if st.button("▶️ Play Video"):
+        frame_count = 0
+        while cap.isOpened():
+            start_time = time.time()
+            ret, frame = cap.read()
+            if not ret: break
+            
+            # --- THE STABILITY FIX ---
+            # We only update the UI every 2nd frame. 
+            # This cuts the data load in half and prevents freezing.
+            if frame_count % 2 == 0:
+                video_screen.image(frame, channels="BGR", use_container_width=True)
+            
+            # --- THE DURATION FIX ---
+            # Maintain the actual video speed
+            elapsed = time.time() - start_time
+            time.sleep(max(0, frame_delay - elapsed))
+            
+            frame_count += 1
+            
+        cap.release()
+        st.success("Playback Finished.")
+
+    if os.path.exists(tfile.name):
+        os.unlink(tfile.name)
