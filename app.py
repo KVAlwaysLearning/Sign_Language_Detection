@@ -83,75 +83,81 @@ with tab2:
 
 # Logic for Tab 3 (Word Video)
 with tab3:
-    st.header("🎥 Word Identification (Video)")
+    st.header("🎥 Word Identification (Auto-Play & Analyze)")
     uploaded_video = st.file_uploader("Upload a sign video", type=['mp4', 'mov', 'avi'], key="w_v")
     
     if uploaded_video:
-        # 1. Initialize variables to prevent Traceback NameErrors
+        # 1. Initialize variables to prevent Traceback errors
         final_word = "" 
         
-        # 2. Save the file so OpenCV can read it
+        # 2. Save to a persistent temporary file
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_video.read())
         tfile.close() 
 
-        # 3. NATIVE PLAYER: This provides HTML5 Play/Pause/Repeat controls
-        st.video(uploaded_video)
+        # 3. Create a Centered, Moderate-Sized Player Container
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            video_screen = st.empty()  # The actual "screen"
+            progress_bar = st.progress(0)
+            status_text = st.empty()
         
-        # 4. ANALYSIS TRIGGER
-        if st.button("🔍 Run AI Word Analysis"):
+        # 4. START BUTTON (Triggers both Playback and Analysis)
+        if st.button("▶️ Start Recognition & Playback"):
             cap = cv2.VideoCapture(tfile.name)
             
             if not cap.isOpened():
-                st.error("OpenCV failed to open video. Please use a standard H.264 MP4.")
+                st.error("Cannot play video. Ensure the file is not corrupted.")
             else:
-                # Setup logic variables
+                # Prediction Logic Settings
                 WINDOW_SIZE, VOTE_THRESHOLD = 12, 8
                 last_word, prediction_window = None, []
-                
-                # Progress UI
-                status_bar = st.progress(0)
-                status_text = st.empty()
-                frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 current_frame = 0
+                
+                # Use the pre-loaded word model
+                model = load_word_model()
 
-                # --- The Core Prediction Loop ---
+                # Loop for Playback + Analysis
                 while cap.isOpened():
                     ret, frame = cap.read()
-                    if not ret: break
+                    if not ret:
+                        # Auto-Replay Logic: Resets to frame 0 if loop ends
+                        # To stop after one play, just keep 'break'
+                        break 
                     
-                    # YOLO Inference
-                    results = word_model(frame, verbose=False)
+                    # A. Identify the current frame
+                    results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
-                    # Temporal Voting Logic
+                    # B. Voting Logic for Word Stability
                     prediction_window.append(label)
                     if len(prediction_window) > WINDOW_SIZE: 
                         prediction_window.pop(0)
                     
                     if len(prediction_window) == WINDOW_SIZE:
-                        counts = Counter(prediction_window)
-                        common, count = counts.most_common(1)[0]
-                        
+                        common, count = Counter(prediction_window).most_common(1)[0]
                         if count >= VOTE_THRESHOLD and common != last_word:
                             if common not in ["Nothing", "Space"]:
                                 final_word += f" {common}"
                                 last_word = common
                                 prediction_window = [] # Reset for next sign
 
-                    # Update UI progress
+                    # C. Update the UI "Screen"
+                    # This ensures the video 'plays' in a moderate size without a black box
+                    video_screen.image(frame, channels="BGR", use_container_width=True)
+                    
                     current_frame += 1
-                    if current_frame % 10 == 0:
-                        status_bar.progress(min(current_frame / frame_total, 1.0))
-                        status_text.markdown(f"**Analyzing...** Current Words: `{final_word}`")
+                    progress_bar.progress(min(current_frame / total_frames, 1.0))
+                    status_text.markdown(f"**Detecting:** `{final_word}`")
 
                 cap.release()
-                
-                # --- FINAL OUTPUT ---
-                status_bar.empty()
-                status_text.empty()
-                st.success(f"🏆 Final Identified Word(s): **{final_word}**")
-                
-        # Cleanup temp file
+                st.success(f"🏆 Final Identified Word: **{final_word}**")
+                st.info("💡 Click 'Start' again to replay the analysis.")
+
+        # Cleanup temp file from server
         if os.path.exists(tfile.name):
-            os.unlink(tfile.name)
+            try:
+                os.unlink(tfile.name)
+            except:
+                pass
