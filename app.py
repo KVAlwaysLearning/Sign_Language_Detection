@@ -132,7 +132,7 @@ with tab3:
                         
                         if count >= VOTE_THRESHOLD and common != last_word:
                             if common not in ["Nothing", "Space"]:
-                                final_word += f" {common}"
+                                final_word += f"{common}"
                                 last_word = common
                                 prediction_window = [] # Wait for next sign
 
