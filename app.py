@@ -119,7 +119,8 @@ with tab3:
                     if not ret: break
                     
                     # Run YOLO Prediction
-                    results = word_model(frame, verbose=False)
+                    model = load_word_model()
+                    results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     
                     # Voting Logic
