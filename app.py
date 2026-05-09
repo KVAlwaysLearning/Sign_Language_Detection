@@ -118,7 +118,7 @@ with tab3:
                         break
                     
                     # Perform prediction on the frame
-                    res = word_model(frame, verbose=False)
+                    res = model(frame, verbose=False)
                     label = res[0].names[res[0].probs.top1]
                     
                     # Voting logic [cite: 6, 8, 9]
