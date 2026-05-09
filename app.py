@@ -134,7 +134,8 @@ with tab3:
                 
                 # A. Analysis (Every 3rd frame to keep playback smooth)
                 if st.session_state.frame_idx % 3 == 0:
-                    results = word_model(frame, verbose=False)
+                    model = load_word_model()
+                    results = model(frame, verbose=False)
                     label = results[0].names[results[0].probs.top1]
                     # ... [Insert your existing Voting Logic here] ...
 
